@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>3D 空間配置 - 手機/電腦雙用版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      user-select: none;
+    }
+    /* 虛擬搖桿底座與推桿 */
+    #joystick-base {
+      display: none;
+      position: absolute;
+      bottom: 90px;
+      left: 24px;
+      width: 110px;
+      height: 110px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 2px solid rgba(255, 255, 255, 0.4);
+      border-radius: 50%;
+      z-index: 30;
+      touch-action: none;
+    }
+    #joystick-stick {
+      position: absolute;
+      top: 35px;
+      left: 35px;
+      width: 40px;
+      height: 40px;
+      background: rgba(255, 255, 255, 0.85);
+      border-radius: 50%;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+      touch-action: none;
+    }
+    #touch-look-zone {
+      display: none;
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 50vw;
+      height: 80vh;
+      z-index: 25;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body class="bg-stone-200 text-stone-800">
+  <!-- 3D Canvas -->
+  <div id="canvas-container" class="w-screen h-screen"></div>
+
+  <!-- 手機第一人稱觸控控制元件 -->
+  <div id="joystick-base"><div id="joystick-stick"></div></div>
+  <div id="touch-look-zone"></div>
+
+  <!-- 頂部標題列 -->
+  <div class="absolute top-3 left-3 right-3 flex justify-between items-start pointer-events-none z-10">
+    <div class="bg-stone-50/90 backdrop-blur border border-stone-200 px-3 py-1.5 rounded-lg shadow-sm">
+      <div class="text-[10px] font-mono tracking-widest text-stone-400">INTERACTIVE 3D</div>
+      <div id="view-title" class="text-sm font-bold text-stone-800">全場剖面</div>
+    </div>
+    <!-- 控制面板摺疊按鈕 -->
+    <button id="toggle-menu" class="pointer-events-auto bg-stone-900/80 text-white text-xs px-3 py-2 rounded-lg backdrop-blur">
+      ⚙️ 控制面板
+    </button>
+  </div>
+
+  <!-- 浮動控制選單 (手機抽屜式) -->
+  <div id="control-panel" class="hidden absolute top-14 right-3 w-60 max-h-[80vh] overflow-y-auto bg-white/95 backdrop-blur-md border border-stone-200 rounded-xl shadow-2xl p-4 flex flex-col gap-4 text-xs z-40">
+    <div>
+      <div class="font-bold text-stone-400 text-[10px] tracking-wider uppercase mb-2">視角切換</div>
+      <div class="grid grid-cols-2 gap-1.5">
+        <button onclick="setView('iso')" class="p-1.5 rounded bg-stone-100 hover:bg-stone-200 font-medium">等角剖面</button>
+        <button onclick="setView('top')" class="p-1.5 rounded bg-stone-100 hover:bg-stone-200 font-medium">正俯視圖</button>
+        <button onclick="setView('office')" class="p-1.5 rounded bg-stone-100 hover:bg-stone-200 font-medium">辦公空間</button>
+        <button onclick="setView('packing')" class="p-1.5 rounded bg-stone-100 hover:bg-stone-200 font-medium">包裝區</button>
+      </div>
+    </div>
+
+    <div class="h-px bg-stone-200"></div>
+
+    <div>
+      <div class="font-bold text-stone-400 text-[10px] tracking-wider uppercase mb-2">圖層顯示 (Layers)</div>
+      <div class="flex flex-col gap-2">
+        <label class="flex justify-between items-center"><span class="text-stone-700">屋頂天花鋼架</span><input type="checkbox" id="toggle-roof" class="accent-emerald-700 w-4 h-4"></label>
+        <label class="flex justify-between items-center"><span class="text-stone-700">倉儲重型貨架</span><input type="checkbox" id="toggle-racks" class="accent-emerald-700 w-4 h-4" checked></label>
+        <label class="flex justify-between items-center"><span class="text-stone-700">棧板紙箱貨物</span><input type="checkbox" id="toggle-boxes" class="accent-emerald-700 w-4 h-4" checked></label>
+        <label class="flex justify-between items-center"><span class="text-stone-700">自動環繞旋轉</span><input type="checkbox" id="toggle-autorotate" class="accent-emerald-700 w-4 h-4"></label>
+      </div>
+    </div>
+
+    <div class="h-px bg-stone-200"></div>
+
+    <div>
+      <div class="font-bold text-stone-400 text-[10px] tracking-wider uppercase mb-1">環境光照亮度</div>
+      <input type="range" id="light-intensity" min="0.3" max="2.0" step="0.1" value="1.0" class="w-full accent-emerald-700">
+    </div>
+  </div>
+
+  <!-- 底部中央模式切換列 -->
+  <div class="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-stone-900/85 backdrop-blur px-3 py-1.5 rounded-full shadow-xl z-20 whitespace-nowrap">
+    <button id="btn-orbit" class="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-700 text-white">環繞觀看</button>
+    <button id="btn-fps" class="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-stone-800 text-stone-300">進入漫遊 (走動)</button>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // 1. 場景基礎建構
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#ece9e4');
+    scene.fog = new THREE.Fog('#ece9e4', 50, 140);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.5, 300);
+    camera.position.set(38, 30, 42);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    const orbitControls = new OrbitControls(camera, renderer.domElement);
+    orbitControls.enableDamping = true;
+    orbitControls.dampingFactor = 0.05;
+    orbitControls.maxPolarAngle = Math.PI / 2 - 0.02;
+    orbitControls.target.set(0, 3, 0);
+
+    // 2. 燈光配置
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcccccc, 0.7);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfffaed, 1.3);
+    dirLight.position.set(30, 40, 20);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 1024;
+    dirLight.shadow.mapSize.height = 1024;
+    scene.add(dirLight);
+
+    // 3. 圖層群組
+    const roofGroup = new THREE.Group();
+    const rackGroup = new THREE.Group();
+    const boxGroup = new THREE.Group();
+    scene.add(roofGroup, rackGroup, boxGroup);
+
+    // 4. 材質與廠房幾何 (長46m, 寬32m, 高8.5m)
+    const W = 46, D = 32, H = 8.5;
+    const matFloor = new THREE.MeshStandardMaterial({ color: 0xc8c8c5, roughness: 0.6 });
+    const matGreen = new THREE.MeshStandardMaterial({ color: 0x486455, roughness: 0.7 });
+    const matWhite = new THREE.MeshStandardMaterial({ color: 0xf0eee9, roughness: 0.8 });
+    const matSteel = new THREE.MeshStandardMaterial({ color: 0x2e4237, roughness: 0.5, metalness: 0.2 });
+    const matRackB = new THREE.MeshStandardMaterial({ color: 0x235789, roughness: 0.4 });
+    const matRackO = new THREE.MeshStandardMaterial({ color: 0xdb6824, roughness: 0.4 });
+    const matBox = new THREE.MeshStandardMaterial({ color: 0xd6b07e, roughness: 0.9 });
+    const matGlass = new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, roughness: 0.1, transmission: 0.9 });
+
+    // 地坪
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), matFloor);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // 雙面牆（剖切開口面向鏡頭）
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.4), matGreen);
+    backWall.position.set(0, H / 2, -D / 2);
+    backWall.castShadow = true;
+    scene.add(backWall);
+
+    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.4, H, D), matGreen);
+    rightWall.position.set(W / 2, H / 2, 0);
+    rightWall.castShadow = true;
+    scene.add(rightWall);
+
+    // 鋼構柱
+    for (let i = 0; i < 5; i++) {
+      const x = -W / 2 + 2 + i * (W / 4.3);
+      const col = new THREE.Mesh(new THREE.BoxGeometry(0.4, H, 0.4), matSteel);
+      col.position.set(x, H / 2, -D / 2 + 0.3);
+      scene.add(col);
+    }
+
+    // 屋頂 (預設隱藏)
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(W, 0.2, D), matSteel);
+    roof.position.set(0, H, 0);
+    roofGroup.add(roof);
+    roofGroup.visible = false;
+
+    // 重型貨架與貨物箱 (左半倉儲區)
+    for (let r = 0; r < 3; r++) {
+      const z = -8 + r * 3.6;
+      for (let b = 0; b < 5; b++) {
+        const x = -18 + b * 2.8;
+        const frame = new THREE.Mesh(new THREE.BoxGeometry(0.12, 5.8, 1.1), matRackB);
+        frame.position.set(x, 2.9, z);
+        rackGroup.add(frame);
+
+        for (let l = 1; l <= 3; l++) {
+          const beam = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.08, 1.05), matRackO);
+          beam.position.set(x + 1.35, l * 1.7, z);
+          rackGroup.add(beam);
+
+          const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.85), matBox);
+          box.position.set(x + 1.35, l * 1.7 + 0.45, z);
+          box.castShadow = true;
+          boxGroup.add(box);
+        }
+      }
+    }
+
+    // 辦公室隔間與工作台 (右半區)
+    const officeGroup = new THREE.Group();
+    const wall1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.2, 14), matWhite);
+    wall1.position.set(6, 1.6, 2);
+    officeGroup.add(wall1);
+
+    const win = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.4, 3.5), matGlass);
+    win.position.set(6, 1.8, 4);
+    officeGroup.add(win);
+
+    for (let i = 0; i < 3; i++) {
+      const desk = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.75, 0.8), matWhite);
+      desk.position.set(11, 0.375, -2 + i * 3);
+      officeGroup.add(desk);
+    }
+    scene.add(officeGroup);
+
+    // 5. 手機觸控第一人稱漫遊引擎
+    let isFPS = false;
+    let yaw = 0, pitch = 0;
+    const moveDir = { x: 0, z: 0 };
+    const joyBase = document.getElementById('joystick-base');
+    const joyStick = document.getElementById('joystick-stick');
+    const touchLook = document.getElementById('touch-look-zone');
+
+    // 虛擬搖桿拖曳處理
+    let touchIdJoy = null;
+    let baseRect = null;
+
+    joyBase.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.changedTouches[0];
+      touchIdJoy = touch.identifier;
+      baseRect = joyBase.getBoundingClientRect();
+      handleJoyMove(touch.clientX, touch.clientY);
+    });
+
+    window.addEventListener('touchmove', (e) => {
+      for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        if (touch.identifier === touchIdJoy) {
+          handleJoyMove(touch.clientX, touch.clientY);
+        }
+      }
+    });
+
+    function handleJoyMove(cx, cy) {
+      const centerX = baseRect.left + baseRect.width / 2;
+      const centerY = baseRect.top + baseRect.height / 2;
+      let dx = cx - centerX;
+      let dy = cy - centerY;
+      const dist = Math.hypot(dx, dy);
+      const maxR = 38;
+      if (dist > maxR) {
+        dx = (dx / dist) * maxR;
+        dy = (dy / dist) * maxR;
+      }
+      joyStick.style.transform = `translate(${dx}px, ${dy}px)`;
+      moveDir.x = dx / maxR;
+      moveDir.z = dy / maxR;
+    }
+
+    function resetJoy() {
+      touchIdJoy = null;
+      joyStick.style.transform = 'translate(0px, 0px)';
+      moveDir.x = 0;
+      moveDir.z = 0;
+    }
+    window.addEventListener('touchend', resetJoy);
+    window.addEventListener('touchcancel', resetJoy);
+
+    // 右側滑動轉動視角
+    let lastLookX = 0, lastLookY = 0;
+    touchLook.addEventListener('touchstart', (e) => {
+      const t = e.touches[0];
+      lastLookX = t.clientX;
+      lastLookY = t.clientY;
+    });
+    touchLook.addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      const dx = t.clientX - lastLookX;
+      const dy = t.clientY - lastLookY;
+      yaw -= dx * 0.005;
+      pitch -= dy * 0.005;
+      pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, pitch));
+      lastLookX = t.clientX;
+      lastLookY = t.clientY;
+    });
+
+    // 鍵盤輔助 (電腦也可跑)
+    const keyState = {};
+    window.addEventListener('keydown', (e) => keyState[e.code] = true);
+    window.addEventListener('keyup', (e) => keyState[e.code] = false);
+
+    // 模式切換按鈕
+    const btnOrbit = document.getElementById('btn-orbit');
+    const btnFps = document.getElementById('btn-fps');
+
+    function setFPS(enable) {
+      isFPS = enable;
+      orbitControls.enabled = !enable;
+      if (enable) {
+        camera.position.set(0, 1.7, 10);
+        yaw = 0; pitch = 0;
+        joyBase.style.display = 'block';
+        touchLook.style.display = 'block';
+        btnOrbit.className = "px-3.5 py-1.5 rounded-full text-xs font-semibold bg-stone-800 text-stone-300";
+        btnFps.className = "px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-700 text-white";
+        document.getElementById('view-title').innerText = "第一人稱漫遊";
+      } else {
+        camera.position.set(38, 30, 42);
+        orbitControls.target.set(0, 3, 0);
+        joyBase.style.display = 'none';
+        touchLook.style.display = 'none';
+        btnOrbit.className = "px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-700 text-white";
+        btnFps.className = "px-3.5 py-1.5 rounded-full text-xs font-semibold bg-stone-800 text-stone-300";
+        document.getElementById('view-title').innerText = "全場剖面";
+      }
+    }
+
+    btnFps.addEventListener('click', () => setFPS(true));
+    btnOrbit.addEventListener('click', () => setFPS(false));
+
+    // UI 選單展開與圖層開關
+    const ctrlPanel = document.getElementById('control-panel');
+    document.getElementById('toggle-menu').addEventListener('click', () => {
+      ctrlPanel.classList.toggle('hidden');
+    });
+    document.getElementById('toggle-roof').addEventListener('change', (e) => roofGroup.visible = e.target.checked);
+    document.getElementById('toggle-racks').addEventListener('change', (e) => rackGroup.visible = e.target.checked);
+    document.getElementById('toggle-boxes').addEventListener('change', (e) => boxGroup.visible = e.target.checked);
+    document.getElementById('toggle-autorotate').addEventListener('change', (e) => orbitControls.autoRotate = e.target.checked);
+    document.getElementById('light-intensity').addEventListener('input', (e) => {
+      dirLight.intensity = parseFloat(e.target.value) * 1.3;
+      hemiLight.intensity = parseFloat(e.target.value) * 0.7;
+    });
+
+    window.setView = function(type) {
+      setFPS(false);
+      ctrlPanel.classList.add('hidden');
+      if (type === 'iso') {
+        camera.position.set(38, 30, 42);
+        orbitControls.target.set(0, 3, 0);
+      } else if (type === 'top') {
+        camera.position.set(0, 50, 0.1);
+        orbitControls.target.set(0, 0, 0);
+      } else if (type === 'office') {
+        camera.position.set(20, 10, 12);
+        orbitControls.target.set(10, 2, 2);
+      } else if (type === 'packing') {
+        camera.position.set(2, 7, 16);
+        orbitControls.target.set(-2, 1.5, 4);
+      }
+    };
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 主渲染迴圈
+    let prev = performance.now();
+    function renderLoop() {
+      requestAnimationFrame(renderLoop);
+      const now = performance.now();
+      const delta = (now - prev) / 1000;
+      prev = now;
+
+      if (isFPS) {
+        // 第一人稱視角方向更新
+        const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+        euler.x = pitch;
+        euler.y = yaw;
+        camera.quaternion.setFromEuler(euler);
+
+        // 鍵盤或虛擬搖桿推移
+        let forward = -moveDir.z;
+        let right = moveDir.x;
+        if (keyState['KeyW']) forward += 1;
+        if (keyState['KeyS']) forward -= 1;
+        if (keyState['KeyA']) right -= 1;
+        if (keyState['KeyD']) right += 1;
+
+        const moveSpeed = 8.0 * delta;
+        const forwardVec = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        const rightVec = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+
+        camera.position.addScaledVector(forwardVec, forward * moveSpeed);
+        camera.position.addScaledVector(rightVec, right * moveSpeed);
+        camera.position.y = 1.7; // 固定人眼高
+
+        // 廠房邊界碰撞阻擋
+        camera.position.x = Math.max(-W/2 + 1, Math.min(W/2 - 1, camera.position.x));
+        camera.position.z = Math.max(-D/2 + 1, Math.min(D/2 - 1, camera.position.z));
+      } else {
+        orbitControls.update();
+      }
+
+      renderer.render(scene, camera);
+    }
+    renderLoop();
+  </script>
+</body>
+</html>
